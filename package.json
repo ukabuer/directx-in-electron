@@ -1,0 +1,17 @@
+{
+  "name": "directx-in-electron",
+  "private": true,
+  "version": "1.0.0",
+  "description": "",
+  "main": "web/main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "ukabuer",
+  "license": "ISC",
+  "devDependencies": {
+    "electron": "^16.0.4"
+  }
+}
