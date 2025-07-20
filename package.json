@@ -12,6 +12,6 @@
   "author": "ukabuer",
   "license": "ISC",
   "devDependencies": {
-    "electron": "^16.0.4"
+    "electron": "^37.2.1"
   }
 }

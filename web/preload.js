@@ -35,25 +35,3 @@ window.addEventListener("DOMContentLoaded", () => {
     replaceText(`${dependency}-version`, process.versions[dependency]);
   }
 });
-
-window.textures.onSharedTexture(async (id, imported) => {
-  try {
-    // Step 7: Get VideoFrame from the imported texture
-    const frame = imported.getVideoFrame();
-
-    // Step 8: Render using WebGPU
-    await window.renderFrame(frame);
-
-    // Step 9: Release the VideoFrame as we no longer need it
-    frame.close();
-  } catch (error) {
-    console.error("Error getting VideoFrame:", error);
-  }
-});
-
-window.textures.verifyCapturedImage((images, result) => {
-  const { captured, target } = images;
-  // Step 19: Compare the captured image with the target image
-  const capturedImage = new Image();
-  capturedImage.src = captured;
-});
