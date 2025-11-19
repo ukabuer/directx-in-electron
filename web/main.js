@@ -5,7 +5,7 @@ const { spawn } = require("child_process");
 
 const target = "build/my-renderer.exe";
 
-const startNewProcess = (hwnd) => {
+const startNativeRendererProcess = (hwnd) => {
 	const data = endianness() === "LE" ? hwnd.readInt32LE() : hwnd.readInt32BE();
 	const p = spawn(target, [data], {
 		cwd: process.cwd(),
@@ -30,16 +30,15 @@ const createWindow = () => {
 	win.loadFile(path.join(__dirname, "index.html"));
 	win.webContents.setFrameRate(60);
 	win.on("ready-to-show", () => {
-		return;
 		const imported = sharedTexture.importSharedTexture({
 			textureInfo: {
 				codedSize: {
-					width: 400,
+					width: 300,
 					height: 300,
 				},
 				pixelFormat: "rgba",
 				handle: {
-					ntHandle: new Buffer(),
+					ntHandle: Buffer.from([0x83, 0xc0].readInt32BE()),
 				},
 			},
 		});
@@ -54,7 +53,7 @@ const createWindow = () => {
 };
 
 app.whenReady().then(() => {
-	// startNewProcess(hwnd);
+	// startNativeRendererProcess(hwnd);
 
 	createWindow();
 

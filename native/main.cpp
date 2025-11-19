@@ -7,6 +7,7 @@
 #include <windowsx.h>
 #include <d3d11.h>
 #include <d3dcompiler.h>
+#include <dxgi1_2.h>
 
 #pragma comment(lib, "d3d11.lib")
 #pragma comment(lib, "dxgi.lib")
@@ -67,7 +68,8 @@ static void RegisterWindowClass()
     WNDCLASSEX wc;
     ZeroMemory(&wc, sizeof(WNDCLASSEX));
     wc.cbSize = sizeof(WNDCLASSEX);
-    wc.style = CS_OWNDC | CS_NOCLOSE | CS_HREDRAW | CS_VREDRAW;
+    // wc.style = CS_OWNDC | CS_NOCLOSE | CS_HREDRAW | CS_VREDRAW;
+    wc.style = CS_OWNDC | CS_HREDRAW | CS_VREDRAW;
     wc.lpfnWndProc = WindowProc;
     wc.hInstance = nullptr;
     wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
@@ -75,6 +77,29 @@ static void RegisterWindowClass()
     wc.lpszClassName = WINDOW_CLASS_NAME;
 
     RegisterClassEx(&wc);
+}
+
+static HWND CreateMyWindow()
+{
+    RECT rect;
+
+    auto window = CreateWindowEx(
+        WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TRANSPARENT | WS_EX_COMPOSITED,
+        WINDOW_CLASS_NAME,
+        nullptr,
+        WS_VISIBLE,
+        0,
+        0,
+        VIEWPORT_WIDTH,
+        VIEWPORT_HEIGHT,
+        nullptr,
+        nullptr,
+        nullptr,
+        nullptr
+    );
+    SetLayeredWindowAttributes(window, 0, 255, LWA_ALPHA);
+
+    return window;
 }
 
 static HWND CreateChildWindow(HWND parent)
@@ -131,7 +156,7 @@ void Render(HWND hWnd)
     scd.OutputWindow = hWnd;
     scd.SampleDesc.Count = 1;
     scd.Windowed = TRUE;
-    scd.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
+    scd.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH ;
     auto hr = D3D11CreateDeviceAndSwapChain(
         nullptr,
         D3D_DRIVER_TYPE_HARDWARE,
@@ -156,6 +181,39 @@ void Render(HWND hWnd)
     assert(SUCCEEDED(hr) && tex != nullptr);
     pCtx->OMSetRenderTargets(1, &pRenderTarget, nullptr);
     tex->Release();
+
+    {
+        ID3D11Texture2D *texture;
+
+        D3D11_TEXTURE2D_DESC texDesc = {
+            .Width = VIEWPORT_WIDTH,
+            .Height = VIEWPORT_HEIGHT,
+            .MipLevels = 1,
+            .ArraySize = 1,
+            .Format = DXGI_FORMAT_B8G8R8A8_UNORM,
+            .SampleDesc = { .Count = 1, .Quality = 0 },
+            .Usage = D3D11_USAGE_DEFAULT,
+            .BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET,
+            .CPUAccessFlags = 0,
+            .MiscFlags = D3D11_RESOURCE_MISC_SHARED_NTHANDLE | D3D11_RESOURCE_MISC_SHARED_KEYEDMUTEX
+        };
+
+        pDev->CreateTexture2D(&texDesc, NULL, &texture);
+        IDXGIResource1* pDXGIResource = NULL;
+
+        hr = texture->QueryInterface(__uuidof(IDXGIResource1), (LPVOID*) &pDXGIResource);
+        assert(SUCCEEDED(hr) && pDXGIResource != nullptr);
+
+        HANDLE handle = 0;
+        hr = pDXGIResource->CreateSharedHandle(nullptr, DXGI_SHARED_RESOURCE_READ, nullptr, &handle);
+        assert(SUCCEEDED(hr) && handle != nullptr);
+
+        std::cout << handle << std::endl;
+
+        hr = pDev->CreateRenderTargetView(texture, nullptr, &pRenderTarget);
+        assert(SUCCEEDED(hr) && pRenderTarget != nullptr);
+        pCtx->OMSetRenderTargets(1, &pRenderTarget, nullptr);
+    }
 
     // Set the viewport
     D3D11_VIEWPORT viewport;
@@ -257,20 +315,21 @@ void Render(HWND hWnd)
 
 int main(int argc, const char** argv)
 {
-    if (argc < 2)
-    {
-        std::cerr << "HWND should be passed as the second arg";
-        return 1;
-    }
+    // if (argc < 2)
+    // {
+    //     std::cerr << "HWND should be passed as the second arg";
+    //     return 1;
+    // }
 
-    auto* arg = argv[1];
-    auto hwnd = reinterpret_cast<HWND>(std::stoi(arg, 0, 10));
+    // auto* arg = argv[1];
+    // auto hwnd = reinterpret_cast<HWND>(std::stoi(arg, 0, 10));
 
     RegisterWindowClass();
-    FixChromeD3DIssue(hwnd);
-    auto child = CreateChildWindow(hwnd);
+    // FixChromeD3DIssue(hwnd);
+    // auto window = CreateChildWindow(hwnd);
+    auto window = CreateMyWindow();
 
-    Render(child);
+    Render(window);
 
     return 0;
 }
