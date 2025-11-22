@@ -1,23 +1,36 @@
 const { app, BrowserWindow, sharedTexture, ipcMain } = require("electron");
-const path = require("path");
-const { endianness } = require("os");
-const { spawn } = require("child_process");
+const path = require("node:path");
+const { spawn } = require("node:child_process");
 
-const target = "build/my-renderer.exe";
+const NATIVE_RENDERER = "build/Debug/my-renderer.exe";
+const TEX_WIDTH = 300;
+const TEX_HEIGHT = 300;
 
-console.log(process.pid, process.pid.toString(16));
-console.log("0x" + process.pid.toString(16));
+const processId = process.pid;
+console.log(
+	`Electron app's main process id: ${processId}(0x${processId.toString(16)})`,
+);
 
-const startNativeRendererProcess = (hwnd) => {
-	const data = endianness() === "LE" ? hwnd.readInt32LE() : hwnd.readInt32BE();
-	const p = spawn(target, [data], {
+const startNativeRendererProcess = (onSharedHandle) => {
+	const p = spawn(NATIVE_RENDERER, [processId], {
 		cwd: process.cwd(),
 	});
 	p.stdout.on("data", (data) => {
-		console.log(`[native side] ${data}`);
+		console.log(`[native side log] ${data}`);
+		const dataStr = data.toString();
+		const regex = /Texture shared handle: (.+)/;
+		const matches = dataStr.match(regex);
+		if (matches) {
+			const hex = `0x${matches[1]}`;
+			const handleInt = parseInt(hex, 16);
+			console.log(
+				`Received Shared Handle: ${handleInt}(0x${handleInt.toString(16)})`,
+			);
+			onSharedHandle(handleInt);
+		}
 	});
 	p.stderr.on("data", (data) => {
-		console.log(`[native side] ${data}`);
+		console.log(`[native side error] ${data}`);
 	});
 };
 
@@ -34,40 +47,21 @@ const createWindow = () => {
 	win.webContents.setFrameRate(60);
 
 	win.on("ready-to-show", async () => {
-		let count = 0;
-		ipcMain.on("renderer", async (event, message) => {
-			console.log(message);
-			const value = parseInt(message);
-			console.log(value);
-			const value1 = message >> 8;
-			const value2 = message & 0xff;
-			console.log(value1, value2);
-			const handle = Buffer.from([
-				value1,
-				value2,
-				0x0,
-				0x0,
-				0x0,
-				0x0,
-				0x0,
-				0x0,
-			]);
-			const handleData = handle.readInt32LE();
-			console.log(handleData.toString(16));
-			// setInterval(() => {
+		const onSharedHandle = async (handleInt) => {
+			const bytes = [];
+			for (let i = 0; i < 8; i++) {
+				const byte = handleInt & 0xff;
+				bytes.push(byte);
+				handleInt = handleInt >> 8;
+			}
+			const handle = Buffer.from(bytes);
 			const imported = sharedTexture.importSharedTexture({
 				textureInfo: {
 					codedSize: {
-						width: 300,
-						height: 300,
+						width: TEX_WIDTH,
+						height: TEX_HEIGHT,
 					},
 					pixelFormat: "bgra",
-					visibleRect: {
-						x: 0,
-						y: 0,
-						width: 300,
-						height: 300,
-					},
 					timestamp: count++,
 					handle: {
 						ntHandle: handle,
@@ -75,25 +69,28 @@ const createWindow = () => {
 				},
 			});
 
-			console.log(imported);
-			console.log("import: " + Date.now());
-
 			await sharedTexture.sendSharedTexture({
 				frame: win.webContents.mainFrame,
 				importedSharedTexture: imported,
 			});
 
-			console.log("sent: " + Date.now());
+			imported.release();
+		};
+		startNativeRendererProcess(onSharedHandle);
 
-			// imported.release();
-			// }, 1000);
+		let count = 0;
+		ipcMain.on("renderer", async (_, message) => {
+			console.log(message);
+			const handleInt = parseInt(message, 10);
+			console.log(
+				`Received Shared Handle: ${handleInt}(0x${handleInt.toString(16)})`,
+			);
+			onSharedHandle(handleInt);
 		});
 	});
 };
 
 app.whenReady().then(() => {
-	// startNativeRendererProcess(hwnd);
-
 	createWindow();
 
 	app.on("activate", () => {

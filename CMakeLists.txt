@@ -5,5 +5,3 @@ project (my-renderer)
 set (CMAKE_CXX_STANDARD 20)
 
 add_executable(${PROJECT_NAME} native/main.cpp)
-
-add_executable(my-renderer2 native/main2.cpp)

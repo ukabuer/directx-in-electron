@@ -3,8 +3,6 @@
 #include <string>
 #include <cstdint>
 
-#include <windows.h>
-#include <windowsx.h>
 #include <d3d11.h>
 #include <d3dcompiler.h>
 #include <dxgi1_2.h>
@@ -17,147 +15,18 @@
 
 #define VIEWPORT_WIDTH 300
 #define VIEWPORT_HEIGHT 300
-#define WINDOW_CLASS_NAME "MyWindowClass"
 
-static DWORD s_target_process = 0;
+static DWORD sTargetProcessId = 0;
 
-// from https://github.com/stream-labs/obs-studio-node/blob/36eeb480f36c9c414fb73223d144f4889e331029/obs-studio-client/source/nodeobs_display.cpp#L32
-static BOOL CALLBACK EnumChromeWindowsProc(HWND hwnd, LPARAM lParam)
-{
-    char buf[256];
-    if (GetClassNameA(hwnd, buf, sizeof(buf) / sizeof(*buf))) {
-        if (strstr(buf, "Intermediate D3D Window")) {
-            LONG_PTR style = GetWindowLongPtr(hwnd, GWL_STYLE);
-            if ((style & WS_CLIPSIBLINGS) == 0) {
-                style |= WS_CLIPSIBLINGS;
-                SetWindowLongPtr(hwnd, GWL_STYLE, style);
-            }
-        }
-    }
-    return TRUE;
-}
-
-// from https://github.com/stream-labs/obs-studio-node/blob/36eeb480f36c9c414fb73223d144f4889e331029/obs-studio-client/source/nodeobs_display.cpp#L47
-static void FixChromeD3DIssue(HWND chromeWindow)
-{
-    // auto handle = FindWindowEx(chromeWindow, nullptr, "Intermediate D3D Window", "");
-    // assert(handle != nullptr);
-    (void)EnumChildWindows(chromeWindow, EnumChromeWindowsProc, 0);
-
-    LONG_PTR style = GetWindowLongPtr(chromeWindow, GWL_STYLE);
-    if ((style & WS_CLIPCHILDREN) == 0) {
-        style |= WS_CLIPCHILDREN;
-        SetWindowLongPtr(chromeWindow, GWL_STYLE, style);
-    }
-}
-
-LRESULT CALLBACK WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
-{
-    switch (message)
-    {
-    case WM_DESTROY:
-    {
-        PostQuitMessage(0);
-        return 0;
-    }
-    default:
-        break;
-    }
-
-    return DefWindowProc(hWnd, message, wParam, lParam);
-}
-
-static void RegisterWindowClass()
-{
-    WNDCLASSEX wc;
-    ZeroMemory(&wc, sizeof(WNDCLASSEX));
-    wc.cbSize = sizeof(WNDCLASSEX);
-    // wc.style = CS_OWNDC | CS_NOCLOSE | CS_HREDRAW | CS_VREDRAW;
-    wc.style = CS_OWNDC | CS_HREDRAW | CS_VREDRAW;
-    wc.lpfnWndProc = WindowProc;
-    wc.hInstance = nullptr;
-    wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
-    wc.hbrBackground = (HBRUSH)COLOR_WINDOW;
-    wc.lpszClassName = WINDOW_CLASS_NAME;
-
-    RegisterClassEx(&wc);
-}
-
-static HWND CreateMyWindow()
-{
-    RECT rect;
-
-    auto window = CreateWindowEx(
-        0, //WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_COMPOSITED,
-        WINDOW_CLASS_NAME,
-        "Test",
-        WS_VISIBLE | WS_OVERLAPPEDWINDOW,
-        0,
-        0,
-        VIEWPORT_WIDTH,
-        VIEWPORT_HEIGHT,
-        nullptr,
-        nullptr,
-        nullptr,
-        nullptr
-    );
-    // SetLayeredWindowAttributes(window, 0, 255, LWA_ALPHA);
-
-    return window;
-}
-
-static HWND CreateChildWindow(HWND parent)
-{
-    RECT rect;
-    GetWindowRect(parent, &rect);
-    int parentWidth = rect.right - rect.left;
-    int parentHeight = rect.bottom - rect.top;
-
-    auto child = CreateWindowEx(
-        WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TRANSPARENT | WS_EX_COMPOSITED,
-        WINDOW_CLASS_NAME,
-        nullptr,
-        WS_VISIBLE | WS_CHILD | WS_POPUP,
-        parentWidth / 2 - VIEWPORT_WIDTH / 2,
-        parentHeight / 2 - VIEWPORT_HEIGHT / 2,
-        VIEWPORT_WIDTH,
-        VIEWPORT_HEIGHT,
-        parent,
-        nullptr,
-        nullptr,
-        nullptr
-    );
-    SetParent(child, parent);
-    SetLayeredWindowAttributes(child, 0, 255, LWA_ALPHA);
-
-    return child;
-}
-
-void Render(HWND hWnd)
+void Render()
 {
     struct Vertex { float x, y, z; float color[4]; };
     struct VShaderParams { float time; float pad[3]; };
 
     ID3D11Device* pDev = nullptr;
     ID3D11DeviceContext* pCtx = nullptr;
-    IDXGISwapChain* pSwapchain = nullptr;
 
-    // setup device & device context & swapchain
-    DXGI_SWAP_CHAIN_DESC scd;
-    ZeroMemory(&scd, sizeof(DXGI_SWAP_CHAIN_DESC));
-    scd.BufferCount = 2;
-    scd.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-    scd.BufferDesc.Width = VIEWPORT_WIDTH;
-    scd.BufferDesc.Height = VIEWPORT_HEIGHT;
-    scd.BufferDesc.RefreshRate.Numerator = 0;
-    scd.BufferDesc.RefreshRate.Denominator = 1;
-    scd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-    scd.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
-    scd.OutputWindow = hWnd;
-    scd.SampleDesc.Count = 1;
-    scd.Windowed = TRUE;
-    // scd.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
-    auto hr = D3D11CreateDeviceAndSwapChain(
+    auto hr = D3D11CreateDevice(
         nullptr,
         D3D_DRIVER_TYPE_HARDWARE,
         0,
@@ -165,13 +34,10 @@ void Render(HWND hWnd)
         nullptr,
         0,
         D3D11_SDK_VERSION,
-        &scd,
-        &pSwapchain,
         &pDev,
         nullptr,
         &pCtx
     );
-    assert(SUCCEEDED(hr) && pDev != nullptr && pCtx != nullptr);
 
     D3D11_INPUT_ELEMENT_DESC ied[] =
     {
@@ -189,7 +55,6 @@ void Render(HWND hWnd)
     ID3D11VertexShader* pVS = nullptr;
     ID3D11PixelShader* pPS = nullptr;
     ID3D11InputLayout* pLayout = nullptr;
-    IDXGIKeyedMutex* pDxgiMutex = nullptr;
     // render triangle data
     {
         D3D11_TEXTURE2D_DESC texDesc = {
@@ -208,30 +73,21 @@ void Render(HWND hWnd)
         assert(SUCCEEDED(hr) && pTexture != nullptr);
 
         IDXGIResource1* pDXGIResource = NULL;
-        HANDLE localHandle = 0;
         hr = pTexture->QueryInterface(__uuidof(IDXGIResource1), (LPVOID*) &pDXGIResource);
         assert(SUCCEEDED(hr) && pDXGIResource != nullptr);
 
-        SECURITY_ATTRIBUTES sa{};
-        sa.bInheritHandle = TRUE;
-        sa.nLength = sizeof(SECURITY_ATTRIBUTES);
-        sa.lpSecurityDescriptor = NULL;
-
-        hr = pDXGIResource->CreateSharedHandle(&sa, GENERIC_ALL | DXGI_SHARED_RESOURCE_READ | DXGI_SHARED_RESOURCE_WRITE , L"SharedTexture", &localHandle);
+        HANDLE localHandle = 0;
+        hr = pDXGIResource->CreateSharedHandle(nullptr, DXGI_SHARED_RESOURCE_READ, L"SharedTexture", &localHandle);
         assert(SUCCEEDED(hr) && localHandle != nullptr);
-        std::cout << "local handle: " << localHandle << std::endl;
-        // pTexture->QueryInterface(__uuidof(IDXGIKeyedMutex), reinterpret_cast<void **>(&pDxgiMutex));
-        // assert(SUCCEEDED(hr) && pDxgiMutex != nullptr);
+
+        HANDLE hProc = OpenProcess(PROCESS_DUP_HANDLE, false, (DWORD)sTargetProcessId);
+        assert(hProc != 0);
 
         HANDLE sharedHandle;
-        HANDLE hProcA = OpenProcess(PROCESS_DUP_HANDLE, false, (DWORD)s_target_process);
-        std::cout << "hProc: " << hProcA << std::endl;
-        assert(hProcA != 0);
-        hr = DuplicateHandle(GetCurrentProcess(), localHandle, hProcA, &sharedHandle, 0, false, DUPLICATE_SAME_ACCESS);
-        std::cout << "dup: " << hr << std::endl;
-        assert(SUCCEEDED(hr));
-        CloseHandle(hProcA);
-        std::cout << "shared handle: " << sharedHandle << std::endl;
+        hr = DuplicateHandle(GetCurrentProcess(), localHandle, hProc, &sharedHandle, 0, false, DUPLICATE_SAME_ACCESS);
+        assert(SUCCEEDED(hr) && sharedHandle != 0);
+        CloseHandle(hProc);
+        std::cout << "Texture shared handle: " << sharedHandle << std::endl;
 
         hr = pDev->CreateRenderTargetView(pTexture, nullptr, &pRenderTarget);
         assert(SUCCEEDED(hr) && pRenderTarget != nullptr);
@@ -283,54 +139,6 @@ void Render(HWND hWnd)
         assert(SUCCEEDED(hr) && pShaderParamsBuffer != nullptr);
     }
 
-    ID3D11RenderTargetView* pBackbuffer = nullptr;
-    ID3D11Buffer* pCopyVertexBuffer = nullptr;
-    ID3D11VertexShader* pCopyVS = nullptr;
-    ID3D11PixelShader* pCopyPS = nullptr;
-    ID3D11InputLayout* pCopyLayout = nullptr;
-    {
-        ID3D11Texture2D* tex = nullptr;
-        hr = pSwapchain->GetBuffer(0, __uuidof(ID3D11Texture2D), reinterpret_cast<LPVOID*>(&tex));
-        assert(SUCCEEDED(hr) && tex != nullptr);
-        hr = pDev->CreateRenderTargetView(tex, nullptr, &pBackbuffer);
-        assert(SUCCEEDED(hr) && pBackbuffer != nullptr);
-        tex->Release();
-
-        ID3D10Blob* vs, *ps;
-        hr = D3DCompileFromFile(L"native\\copy.hlsl", 0, 0, "VShader", "vs_4_0", 0, 0, &vs, 0);
-        assert(SUCCEEDED(hr) && vs != nullptr);
-        hr = D3DCompileFromFile(L"native\\copy.hlsl", 0, 0, "PShader", "ps_4_0", 0, 0, &ps, 0);
-        assert(SUCCEEDED(hr) && ps != nullptr);
-        pDev->CreateVertexShader(vs->GetBufferPointer(), vs->GetBufferSize(), nullptr, &pCopyVS);
-        pDev->CreatePixelShader(ps->GetBufferPointer(), ps->GetBufferSize(), nullptr, &pCopyPS);
-
-        // setup input layout
-        pDev->CreateInputLayout(ied, 2, vs->GetBufferPointer(), vs->GetBufferSize(), &pCopyLayout);
-        assert(SUCCEEDED(hr) && pCopyLayout != nullptr);
-
-        Vertex vertices[] =
-        {
-            {-1.0f, 1.0f, 0.0f, {1.0f, 0.0f, 0.0f, 1.0f}},
-            {1.0f,  1.0f, 0.0f, {0.0f, 1.0f, 0.0f, 1.0f}},
-            {-1.0f, -1.0f, 0.0f, {0.0f, 0.0f, 1.0f, 1.0f}},
-
-            {-1.0f, -1.0f, 0.0f, {0.0f, 0.0f, 1.0f, 1.0f}},
-            { 1.0f,  1.0f, 0.0f, {0.0f, 0.0f, 1.0f, 1.0f}},
-            { 1.0f, -1.0f, 0.0f, {0.0f, 0.0f, 1.0f, 1.0f}}
-        };
-        D3D11_SUBRESOURCE_DATA data;
-        ZeroMemory(&data, sizeof(data));
-        data.pSysMem = vertices;
-
-        D3D11_BUFFER_DESC bd;
-        ZeroMemory(&bd, sizeof(bd));
-        bd.Usage = D3D11_USAGE_DEFAULT;
-        bd.ByteWidth = sizeof(Vertex) * 6;
-        bd.BindFlags = D3D11_BIND_VERTEX_BUFFER;
-        hr = pDev->CreateBuffer(&bd, &data, &pCopyVertexBuffer);
-        assert(SUCCEEDED(hr) && pCopyVertexBuffer != nullptr);
-    }
-
     // Set the viewport
     D3D11_VIEWPORT viewport;
     ZeroMemory(&viewport, sizeof(D3D11_VIEWPORT));
@@ -356,12 +164,11 @@ void Render(HWND hWnd)
         }
         
         frame++;
+
         // render triangle
-        // if (frame < 3)
         {
-            // pDxgiMutex->AcquireSync(233, 1000);
             pCtx->OMSetRenderTargets(1, &pRenderTarget, nullptr);
-            float color[4] = { 1.0f, 1.0f, 0.0f, 1.0f };
+            float color[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
             pCtx->ClearRenderTargetView(pRenderTarget, color);
 
             pCtx->IASetInputLayout(pLayout);
@@ -380,40 +187,15 @@ void Render(HWND hWnd)
             pCtx->Draw(3, 0);
 
             pCtx->OMSetRenderTargets(0, nullptr, nullptr);
-
-            // pDxgiMutex->ReleaseSync(233);
-        }
-        
-        // copy to backbuffer
-        if (1)
-        {
-            pCtx->OMSetRenderTargets(1, &pBackbuffer, nullptr);
-            float color[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
-            pCtx->ClearRenderTargetView(pBackbuffer, color);
-
-            pCtx->IASetInputLayout(pCopyLayout);
-            uint32_t stride = sizeof(Vertex);
-            UINT offset = 0;
-            pCtx->IASetVertexBuffers(0, 1, &pCopyVertexBuffer, &stride, &offset);
-            pCtx->IASetPrimitiveTopology(D3D10_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-
-            pCtx->VSSetShader(pCopyVS, 0, 0);
-            pCtx->PSSetShader(pCopyPS, 0, 0);
-
-            pCtx->PSSetShaderResources(0, 1, &pSrv);
-
-            pCtx->Draw(6, 0);
         }
 
-        hr = pSwapchain->Present(0, 0);
-        assert(SUCCEEDED(hr));
+        pCtx->Flush();
     }
 
     pLayout->Release();
     pVS->Release();
     pPS->Release();
     pVertexBuffer->Release();
-    pSwapchain->Release();
     pDev->Release();
     pRenderTarget->Release();
     pCtx->Release();
@@ -423,20 +205,15 @@ int main(int argc, const char** argv)
 {
     if (argc < 2)
     {
-        std::cerr << "handle should be passed as the second arg";
+        std::cerr << "process id should be passed as the second arg";
         return 1;
     }
 
     auto* arg = argv[1];
-    s_target_process = static_cast<DWORD>(std::stoi(arg, 0, 10));
-    std::cout << s_target_process << std::endl;
+    sTargetProcessId = static_cast<DWORD>(std::stoi(arg, 0, 10));
+    std::cout << "Get Electron app's main process id: " << sTargetProcessId << std::endl;
 
-    RegisterWindowClass();
-    // FixChromeD3DIssue(hwnd);
-    // auto window = CreateChildWindow(hwnd);
-    auto window = CreateMyWindow();
-
-    Render(window);
+    Render();
 
     return 0;
 }
