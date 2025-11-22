@@ -8,6 +8,8 @@
 #include <d3d11.h>
 #include <d3dcompiler.h>
 #include <dxgi1_2.h>
+#include <processthreadsapi.h>
+#include <handleapi.h>
 
 #pragma comment(lib, "d3d11.lib")
 #pragma comment(lib, "dxgi.lib")
@@ -16,6 +18,8 @@
 #define VIEWPORT_WIDTH 300
 #define VIEWPORT_HEIGHT 300
 #define WINDOW_CLASS_NAME "MyWindowClass"
+
+static DWORD s_target_process = 0;
 
 // from https://github.com/stream-labs/obs-studio-node/blob/36eeb480f36c9c414fb73223d144f4889e331029/obs-studio-client/source/nodeobs_display.cpp#L32
 static BOOL CALLBACK EnumChromeWindowsProc(HWND hwnd, LPARAM lParam)
@@ -84,10 +88,10 @@ static HWND CreateMyWindow()
     RECT rect;
 
     auto window = CreateWindowEx(
-        WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TRANSPARENT | WS_EX_COMPOSITED,
+        0, //WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_COMPOSITED,
         WINDOW_CLASS_NAME,
-        nullptr,
-        WS_VISIBLE,
+        "Test",
+        WS_VISIBLE | WS_OVERLAPPEDWINDOW,
         0,
         0,
         VIEWPORT_WIDTH,
@@ -97,7 +101,7 @@ static HWND CreateMyWindow()
         nullptr,
         nullptr
     );
-    SetLayeredWindowAttributes(window, 0, 255, LWA_ALPHA);
+    // SetLayeredWindowAttributes(window, 0, 255, LWA_ALPHA);
 
     return window;
 }
@@ -137,26 +141,22 @@ void Render(HWND hWnd)
     ID3D11Device* pDev = nullptr;
     ID3D11DeviceContext* pCtx = nullptr;
     IDXGISwapChain* pSwapchain = nullptr;
-    ID3D11RenderTargetView* pRenderTarget = nullptr;
-    ID3D11InputLayout* pLayout = nullptr;
-    ID3D11VertexShader* pVS = nullptr;
-    ID3D11PixelShader* pPS = nullptr;
-    ID3D11Buffer* pVertexBuffer = nullptr;
-    ID3D11Buffer* pShaderParamsBuffer = nullptr;
-    VShaderParams params{};
 
     // setup device & device context & swapchain
     DXGI_SWAP_CHAIN_DESC scd;
     ZeroMemory(&scd, sizeof(DXGI_SWAP_CHAIN_DESC));
-    scd.BufferCount = 1;
+    scd.BufferCount = 2;
     scd.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
     scd.BufferDesc.Width = VIEWPORT_WIDTH;
     scd.BufferDesc.Height = VIEWPORT_HEIGHT;
+    scd.BufferDesc.RefreshRate.Numerator = 0;
+    scd.BufferDesc.RefreshRate.Denominator = 1;
     scd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+    scd.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
     scd.OutputWindow = hWnd;
     scd.SampleDesc.Count = 1;
     scd.Windowed = TRUE;
-    scd.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH ;
+    // scd.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
     auto hr = D3D11CreateDeviceAndSwapChain(
         nullptr,
         D3D_DRIVER_TYPE_HARDWARE,
@@ -173,18 +173,25 @@ void Render(HWND hWnd)
     );
     assert(SUCCEEDED(hr) && pDev != nullptr && pCtx != nullptr);
 
-    // setup render targets
-    ID3D11Texture2D* tex = nullptr;
-    hr = pSwapchain->GetBuffer(0, __uuidof(ID3D11Texture2D), reinterpret_cast<LPVOID*>(&tex));
-    assert(SUCCEEDED(hr) && tex != nullptr);
-    hr = pDev->CreateRenderTargetView(tex, nullptr, &pRenderTarget);
-    assert(SUCCEEDED(hr) && tex != nullptr);
-    pCtx->OMSetRenderTargets(1, &pRenderTarget, nullptr);
-    tex->Release();
-
+    D3D11_INPUT_ELEMENT_DESC ied[] =
     {
-        ID3D11Texture2D *texture;
+        {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0},
+        {"COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0},
+    };
 
+    VShaderParams params{};
+    
+    ID3D11Texture2D *pTexture = nullptr;
+    ID3D11ShaderResourceView* pSrv = nullptr;
+    ID3D11RenderTargetView* pRenderTarget = nullptr;
+    ID3D11Buffer* pVertexBuffer = nullptr;
+    ID3D11Buffer* pShaderParamsBuffer = nullptr;
+    ID3D11VertexShader* pVS = nullptr;
+    ID3D11PixelShader* pPS = nullptr;
+    ID3D11InputLayout* pLayout = nullptr;
+    IDXGIKeyedMutex* pDxgiMutex = nullptr;
+    // render triangle data
+    {
         D3D11_TEXTURE2D_DESC texDesc = {
             .Width = VIEWPORT_WIDTH,
             .Height = VIEWPORT_HEIGHT,
@@ -194,25 +201,134 @@ void Render(HWND hWnd)
             .SampleDesc = { .Count = 1, .Quality = 0 },
             .Usage = D3D11_USAGE_DEFAULT,
             .BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET,
-            .CPUAccessFlags = 0,
-            .MiscFlags = D3D11_RESOURCE_MISC_SHARED_NTHANDLE | D3D11_RESOURCE_MISC_SHARED_KEYEDMUTEX
+            .CPUAccessFlags = D3D11_CPU_ACCESS_READ | D3D11_CPU_ACCESS_WRITE,
+            .MiscFlags = D3D11_RESOURCE_MISC_SHARED_NTHANDLE | D3D11_RESOURCE_MISC_SHARED 
         };
+        pDev->CreateTexture2D(&texDesc, NULL, &pTexture);
+        assert(SUCCEEDED(hr) && pTexture != nullptr);
 
-        pDev->CreateTexture2D(&texDesc, NULL, &texture);
         IDXGIResource1* pDXGIResource = NULL;
-
-        hr = texture->QueryInterface(__uuidof(IDXGIResource1), (LPVOID*) &pDXGIResource);
+        HANDLE localHandle = 0;
+        hr = pTexture->QueryInterface(__uuidof(IDXGIResource1), (LPVOID*) &pDXGIResource);
         assert(SUCCEEDED(hr) && pDXGIResource != nullptr);
 
-        HANDLE handle = 0;
-        hr = pDXGIResource->CreateSharedHandle(nullptr, DXGI_SHARED_RESOURCE_READ, nullptr, &handle);
-        assert(SUCCEEDED(hr) && handle != nullptr);
+        SECURITY_ATTRIBUTES sa{};
+        sa.bInheritHandle = TRUE;
+        sa.nLength = sizeof(SECURITY_ATTRIBUTES);
+        sa.lpSecurityDescriptor = NULL;
 
-        std::cout << handle << std::endl;
+        hr = pDXGIResource->CreateSharedHandle(&sa, GENERIC_ALL | DXGI_SHARED_RESOURCE_READ | DXGI_SHARED_RESOURCE_WRITE , L"SharedTexture", &localHandle);
+        assert(SUCCEEDED(hr) && localHandle != nullptr);
+        std::cout << "local handle: " << localHandle << std::endl;
+        // pTexture->QueryInterface(__uuidof(IDXGIKeyedMutex), reinterpret_cast<void **>(&pDxgiMutex));
+        // assert(SUCCEEDED(hr) && pDxgiMutex != nullptr);
 
-        hr = pDev->CreateRenderTargetView(texture, nullptr, &pRenderTarget);
+        HANDLE sharedHandle;
+        HANDLE hProcA = OpenProcess(PROCESS_DUP_HANDLE, false, (DWORD)s_target_process);
+        std::cout << "hProc: " << hProcA << std::endl;
+        assert(hProcA != 0);
+        hr = DuplicateHandle(GetCurrentProcess(), localHandle, hProcA, &sharedHandle, 0, false, DUPLICATE_SAME_ACCESS);
+        std::cout << "dup: " << hr << std::endl;
+        assert(SUCCEEDED(hr));
+        CloseHandle(hProcA);
+        std::cout << "shared handle: " << sharedHandle << std::endl;
+
+        hr = pDev->CreateRenderTargetView(pTexture, nullptr, &pRenderTarget);
         assert(SUCCEEDED(hr) && pRenderTarget != nullptr);
         pCtx->OMSetRenderTargets(1, &pRenderTarget, nullptr);
+
+        hr = pDev->CreateShaderResourceView(pTexture, nullptr, &pSrv);
+        assert(SUCCEEDED(hr) && pSrv != nullptr);
+
+        pTexture->Release();
+
+        // compile and setup shaders
+        ID3D10Blob* vs, *ps;
+        hr = D3DCompileFromFile(L"native\\shaders.hlsl", 0, 0, "VShader", "vs_4_0", 0, 0, &vs, 0);
+        assert(SUCCEEDED(hr) && vs != nullptr);
+        hr = D3DCompileFromFile(L"native\\shaders.hlsl", 0, 0, "PShader", "ps_4_0", 0, 0, &ps, 0);
+        assert(SUCCEEDED(hr) && ps != nullptr);
+        pDev->CreateVertexShader(vs->GetBufferPointer(), vs->GetBufferSize(), nullptr, &pVS);
+        pDev->CreatePixelShader(ps->GetBufferPointer(), ps->GetBufferSize(), nullptr, &pPS);
+
+        // setup input layout
+        pDev->CreateInputLayout(ied, 2, vs->GetBufferPointer(), vs->GetBufferSize(), &pLayout);
+
+        // setup vertex buffer
+        Vertex vertices[] =
+        {
+            {0.0f, 0.5f, 0.0f, {1.0f, 0.0f, 0.0f, 1.0f}},
+            {0.5f, -0.5, 0.0f, {0.0f, 1.0f, 0.0f, 1.0f}},
+            {-0.5f, -0.5f, 0.0f, {0.0f, 0.0f, 1.0f, 1.0f}}
+        };
+        D3D11_SUBRESOURCE_DATA data;
+        ZeroMemory(&data, sizeof(data));
+        data.pSysMem = vertices;
+
+        D3D11_BUFFER_DESC bd;
+        ZeroMemory(&bd, sizeof(bd));
+        bd.Usage = D3D11_USAGE_DEFAULT;
+        bd.ByteWidth = sizeof(Vertex) * 3;
+        bd.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+        hr = pDev->CreateBuffer(&bd, &data, &pVertexBuffer);
+        assert(SUCCEEDED(hr) && pVertexBuffer != nullptr);
+
+        // setup shader params buffer
+        D3D11_BUFFER_DESC cbd;
+        ZeroMemory(&cbd, sizeof(cbd));
+        cbd.Usage = D3D11_USAGE_DEFAULT;
+        cbd.ByteWidth = sizeof(VShaderParams);
+        cbd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+        hr = pDev->CreateBuffer(&cbd, nullptr, &pShaderParamsBuffer);
+        assert(SUCCEEDED(hr) && pShaderParamsBuffer != nullptr);
+    }
+
+    ID3D11RenderTargetView* pBackbuffer = nullptr;
+    ID3D11Buffer* pCopyVertexBuffer = nullptr;
+    ID3D11VertexShader* pCopyVS = nullptr;
+    ID3D11PixelShader* pCopyPS = nullptr;
+    ID3D11InputLayout* pCopyLayout = nullptr;
+    {
+        ID3D11Texture2D* tex = nullptr;
+        hr = pSwapchain->GetBuffer(0, __uuidof(ID3D11Texture2D), reinterpret_cast<LPVOID*>(&tex));
+        assert(SUCCEEDED(hr) && tex != nullptr);
+        hr = pDev->CreateRenderTargetView(tex, nullptr, &pBackbuffer);
+        assert(SUCCEEDED(hr) && pBackbuffer != nullptr);
+        tex->Release();
+
+        ID3D10Blob* vs, *ps;
+        hr = D3DCompileFromFile(L"native\\copy.hlsl", 0, 0, "VShader", "vs_4_0", 0, 0, &vs, 0);
+        assert(SUCCEEDED(hr) && vs != nullptr);
+        hr = D3DCompileFromFile(L"native\\copy.hlsl", 0, 0, "PShader", "ps_4_0", 0, 0, &ps, 0);
+        assert(SUCCEEDED(hr) && ps != nullptr);
+        pDev->CreateVertexShader(vs->GetBufferPointer(), vs->GetBufferSize(), nullptr, &pCopyVS);
+        pDev->CreatePixelShader(ps->GetBufferPointer(), ps->GetBufferSize(), nullptr, &pCopyPS);
+
+        // setup input layout
+        pDev->CreateInputLayout(ied, 2, vs->GetBufferPointer(), vs->GetBufferSize(), &pCopyLayout);
+        assert(SUCCEEDED(hr) && pCopyLayout != nullptr);
+
+        Vertex vertices[] =
+        {
+            {-1.0f, 1.0f, 0.0f, {1.0f, 0.0f, 0.0f, 1.0f}},
+            {1.0f,  1.0f, 0.0f, {0.0f, 1.0f, 0.0f, 1.0f}},
+            {-1.0f, -1.0f, 0.0f, {0.0f, 0.0f, 1.0f, 1.0f}},
+
+            {-1.0f, -1.0f, 0.0f, {0.0f, 0.0f, 1.0f, 1.0f}},
+            { 1.0f,  1.0f, 0.0f, {0.0f, 0.0f, 1.0f, 1.0f}},
+            { 1.0f, -1.0f, 0.0f, {0.0f, 0.0f, 1.0f, 1.0f}}
+        };
+        D3D11_SUBRESOURCE_DATA data;
+        ZeroMemory(&data, sizeof(data));
+        data.pSysMem = vertices;
+
+        D3D11_BUFFER_DESC bd;
+        ZeroMemory(&bd, sizeof(bd));
+        bd.Usage = D3D11_USAGE_DEFAULT;
+        bd.ByteWidth = sizeof(Vertex) * 6;
+        bd.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+        hr = pDev->CreateBuffer(&bd, &data, &pCopyVertexBuffer);
+        assert(SUCCEEDED(hr) && pCopyVertexBuffer != nullptr);
     }
 
     // Set the viewport
@@ -224,56 +340,9 @@ void Render(HWND hWnd)
     viewport.Height = VIEWPORT_HEIGHT;
     pCtx->RSSetViewports(1, &viewport);
 
-    // compile and setup shaders
-    ID3D10Blob* vs, *ps;
-    hr = D3DCompileFromFile(L"native\\shaders.hlsl", 0, 0, "VShader", "vs_4_0", 0, 0, &vs, 0);
-    assert(SUCCEEDED(hr) && vs != nullptr);
-    hr = D3DCompileFromFile(L"native\\shaders.hlsl", 0, 0, "PShader", "ps_4_0", 0, 0, &ps, 0);
-    assert(SUCCEEDED(hr) && ps != nullptr);
-    pDev->CreateVertexShader(vs->GetBufferPointer(), vs->GetBufferSize(), nullptr, &pVS);
-    pDev->CreatePixelShader(ps->GetBufferPointer(), ps->GetBufferSize(), nullptr, &pPS);
-    pCtx->VSSetShader(pVS, 0, 0);
-    pCtx->PSSetShader(pPS, 0, 0);
-
-    // setup input layout
-    D3D11_INPUT_ELEMENT_DESC ied[] =
-    {
-        {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0},
-        {"COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0},
-    };
-    pDev->CreateInputLayout(ied, 2, vs->GetBufferPointer(), vs->GetBufferSize(), &pLayout);
-    pCtx->IASetInputLayout(pLayout);
-
-    // setup vertex buffer
-    Vertex vertices[] =
-    {
-        {0.0f, 0.5f, 0.0f, {1.0f, 0.0f, 0.0f, 1.0f}},
-        {0.5f, -0.5, 0.0f, {0.0f, 1.0f, 0.0f, 1.0f}},
-        {-0.5f, -0.5f, 0.0f, {0.0f, 0.0f, 1.0f, 1.0f}}
-    };
-    D3D11_SUBRESOURCE_DATA data;
-    ZeroMemory(&data, sizeof(data));
-    data.pSysMem = vertices;
-
-    D3D11_BUFFER_DESC bd;
-    ZeroMemory(&bd, sizeof(bd));
-    bd.Usage = D3D11_USAGE_DEFAULT;
-    bd.ByteWidth = sizeof(Vertex) * 3;
-    bd.BindFlags = D3D11_BIND_VERTEX_BUFFER;
-    hr = pDev->CreateBuffer(&bd, &data, &pVertexBuffer);
-    assert(SUCCEEDED(hr) && pVertexBuffer != nullptr);
-
-    // setup shader params buffer
-    D3D11_BUFFER_DESC cbd;
-    ZeroMemory(&cbd, sizeof(cbd));
-    cbd.Usage = D3D11_USAGE_DEFAULT;
-    cbd.ByteWidth = sizeof(VShaderParams);
-    cbd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-    hr = pDev->CreateBuffer(&cbd, nullptr, &pShaderParamsBuffer);
-    assert(SUCCEEDED(hr) && pShaderParamsBuffer != nullptr);
-
     MSG msg;
     // enter the render loop
+    uint32_t frame = 0;
     while (true)
     {
         if (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE))
@@ -286,21 +355,58 @@ void Render(HWND hWnd)
             }
         }
         
-        float color[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
-        pCtx->ClearRenderTargetView(pRenderTarget, color);
+        frame++;
+        // render triangle
+        // if (frame < 3)
+        {
+            // pDxgiMutex->AcquireSync(233, 1000);
+            pCtx->OMSetRenderTargets(1, &pRenderTarget, nullptr);
+            float color[4] = { 1.0f, 1.0f, 0.0f, 1.0f };
+            pCtx->ClearRenderTargetView(pRenderTarget, color);
 
-        uint32_t stride = sizeof(Vertex);
-        UINT offset = 0;
-        pCtx->IASetVertexBuffers(0, 1, &pVertexBuffer, &stride, &offset);
-        pCtx->IASetPrimitiveTopology(D3D10_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+            pCtx->IASetInputLayout(pLayout);
+            uint32_t stride = sizeof(Vertex);
+            UINT offset = 0;
+            pCtx->IASetVertexBuffers(0, 1, &pVertexBuffer, &stride, &offset);
+            pCtx->IASetPrimitiveTopology(D3D10_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+            
+            pCtx->VSSetShader(pVS, 0, 0);
+            pCtx->PSSetShader(pPS, 0, 0);
 
-        params.time += 0.001f;
-        pCtx->UpdateSubresource(reinterpret_cast<ID3D11Resource*>(pShaderParamsBuffer), 0, nullptr, &params, 0, 0);
-        pCtx->VSSetConstantBuffers(0, 1, &pShaderParamsBuffer);
+            params.time += 0.001f;
+            pCtx->UpdateSubresource(reinterpret_cast<ID3D11Resource*>(pShaderParamsBuffer), 0, nullptr, &params, 0, 0);
+            pCtx->VSSetConstantBuffers(0, 1, &pShaderParamsBuffer);
 
-        pCtx->Draw(3, 0);
+            pCtx->Draw(3, 0);
 
-        pSwapchain->Present(0, 0);
+            pCtx->OMSetRenderTargets(0, nullptr, nullptr);
+
+            // pDxgiMutex->ReleaseSync(233);
+        }
+        
+        // copy to backbuffer
+        if (1)
+        {
+            pCtx->OMSetRenderTargets(1, &pBackbuffer, nullptr);
+            float color[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
+            pCtx->ClearRenderTargetView(pBackbuffer, color);
+
+            pCtx->IASetInputLayout(pCopyLayout);
+            uint32_t stride = sizeof(Vertex);
+            UINT offset = 0;
+            pCtx->IASetVertexBuffers(0, 1, &pCopyVertexBuffer, &stride, &offset);
+            pCtx->IASetPrimitiveTopology(D3D10_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+            pCtx->VSSetShader(pCopyVS, 0, 0);
+            pCtx->PSSetShader(pCopyPS, 0, 0);
+
+            pCtx->PSSetShaderResources(0, 1, &pSrv);
+
+            pCtx->Draw(6, 0);
+        }
+
+        hr = pSwapchain->Present(0, 0);
+        assert(SUCCEEDED(hr));
     }
 
     pLayout->Release();
@@ -315,14 +421,15 @@ void Render(HWND hWnd)
 
 int main(int argc, const char** argv)
 {
-    // if (argc < 2)
-    // {
-    //     std::cerr << "HWND should be passed as the second arg";
-    //     return 1;
-    // }
+    if (argc < 2)
+    {
+        std::cerr << "handle should be passed as the second arg";
+        return 1;
+    }
 
-    // auto* arg = argv[1];
-    // auto hwnd = reinterpret_cast<HWND>(std::stoi(arg, 0, 10));
+    auto* arg = argv[1];
+    s_target_process = static_cast<DWORD>(std::stoi(arg, 0, 10));
+    std::cout << s_target_process << std::endl;
 
     RegisterWindowClass();
     // FixChromeD3DIssue(hwnd);
