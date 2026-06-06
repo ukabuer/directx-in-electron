@@ -1,25 +1,21 @@
 Draw a triangle inside Electron's window using DirectX 11, mixing web and native content.
 
+By using Electron's [`SharedTexture`](https://github.com/electron/electron/blob/v42.3.3/shell/common/api/shared_texture/README.md) API, we can render to an HTML canvas externally.
+
 ![preview](preview.png)
 
-## Limitations
-
-The native content is rendered over a child window, rather than embedded into the web page. It won't be affected by any web content.
-
-## Requirement
+## Requirements
 
 - Visual Studio with C++ support
-- CMake
 - NodeJS & npm
 
 ## Build & Run
 
-Build the native code
+Build the native code (run in **x64 Native Tools Command Prompt for VS**):
 
 ```
-mkdir build && cd build
-cmake ..
-cmake --build .
+mkdir build
+cl /EHsc /Fo:.\build\ /Fe:build\my-renderer.exe native\main.cpp
 ```
 
 Install Electron and run the application

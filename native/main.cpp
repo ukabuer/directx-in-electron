@@ -12,6 +12,7 @@
 #pragma comment(lib, "d3d11.lib")
 #pragma comment(lib, "dxgi.lib")
 #pragma comment(lib, "d3dcompiler.lib")
+#pragma comment(lib, "user32.lib")
 
 #define VIEWPORT_WIDTH 300
 #define VIEWPORT_HEIGHT 300
@@ -57,18 +58,19 @@ void Render()
     ID3D11InputLayout* pLayout = nullptr;
     // render triangle data
     {
-        D3D11_TEXTURE2D_DESC texDesc = {
-            .Width = VIEWPORT_WIDTH,
-            .Height = VIEWPORT_HEIGHT,
-            .MipLevels = 1,
-            .ArraySize = 1,
-            .Format = DXGI_FORMAT_B8G8R8A8_UNORM,
-            .SampleDesc = { .Count = 1, .Quality = 0 },
-            .Usage = D3D11_USAGE_DEFAULT,
-            .BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET,
-            .CPUAccessFlags = D3D11_CPU_ACCESS_READ | D3D11_CPU_ACCESS_WRITE,
-            .MiscFlags = D3D11_RESOURCE_MISC_SHARED_NTHANDLE | D3D11_RESOURCE_MISC_SHARED 
-        };
+        D3D11_TEXTURE2D_DESC texDesc;
+        ZeroMemory(&texDesc, sizeof(texDesc));
+        texDesc.Width = VIEWPORT_WIDTH;
+        texDesc.Height = VIEWPORT_HEIGHT;
+        texDesc.MipLevels = 1;
+        texDesc.ArraySize = 1;
+        texDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+        texDesc.SampleDesc.Count = 1;
+        texDesc.SampleDesc.Quality = 0;
+        texDesc.Usage = D3D11_USAGE_DEFAULT;
+        texDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
+        texDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ | D3D11_CPU_ACCESS_WRITE;
+        texDesc.MiscFlags = D3D11_RESOURCE_MISC_SHARED_NTHANDLE | D3D11_RESOURCE_MISC_SHARED;
         pDev->CreateTexture2D(&texDesc, NULL, &pTexture);
         assert(SUCCEEDED(hr) && pTexture != nullptr);
 

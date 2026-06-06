@@ -2,7 +2,7 @@ const { app, BrowserWindow, sharedTexture, ipcMain } = require("electron");
 const path = require("node:path");
 const { spawn } = require("node:child_process");
 
-const NATIVE_RENDERER = "build/Debug/my-renderer.exe";
+const NATIVE_RENDERER = "build/my-renderer.exe";
 const TEX_WIDTH = 300;
 const TEX_HEIGHT = 300;
 
