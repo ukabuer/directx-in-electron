@@ -22,7 +22,7 @@ static DWORD sTargetProcessId = 0;
 void Render()
 {
     struct Vertex { float x, y, z; float color[4]; };
-    struct VShaderParams { float time; float pad[3]; };
+    struct VShaderParams { float time; float width; float height; float pad; };
 
     ID3D11Device* pDev = nullptr;
     ID3D11DeviceContext* pCtx = nullptr;
@@ -47,7 +47,9 @@ void Render()
     };
 
     VShaderParams params{};
-    
+    params.width = VIEWPORT_WIDTH;
+    params.height = VIEWPORT_HEIGHT;
+
     ID3D11Texture2D *pTexture = nullptr;
     ID3D11ShaderResourceView* pSrv = nullptr;
     ID3D11RenderTargetView* pRenderTarget = nullptr;
@@ -185,6 +187,7 @@ void Render()
             params.time += 0.001f;
             pCtx->UpdateSubresource(reinterpret_cast<ID3D11Resource*>(pShaderParamsBuffer), 0, nullptr, &params, 0, 0);
             pCtx->VSSetConstantBuffers(0, 1, &pShaderParamsBuffer);
+            pCtx->PSSetConstantBuffers(0, 1, &pShaderParamsBuffer);
 
             pCtx->Draw(3, 0);
 
